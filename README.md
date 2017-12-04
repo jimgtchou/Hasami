@@ -2,7 +2,7 @@
 Watches bittrex and binance exchanges then posts on a discord channel what is increasing, by how much, and the exchange that it's increasing on.
 
 ## Personal Use
-There are two things that you currently need to change.
+There are two things that you currently need to change. (Lines 8 and 9)
 ```python
 CLIENT_TOKEN = "YOUR_ID_HERE"
 CHANNEL_ID = "CHANNEL_ID_HERE"
