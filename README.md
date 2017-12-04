@@ -9,7 +9,7 @@ CHANNEL_ID = "CHANNEL_ID_HERE"
 ```
 Set `CLIENT_TOKEN` to your personal bot's token, and `CHANNEL_ID` to your personal channel's id.
 
-### TODO
+## TODO
 1. Documentation.
 2. More modularity.
 3. Support for decreasing prices.
