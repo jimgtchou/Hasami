@@ -10,6 +10,7 @@ CHANNEL_ID = "CHANNEL_ID_HERE"
 def get_percent_change(old_price, new_price):
 	return round( float ( ( (new_price - old_price ) / old_price ) * 100 ), 2)
 
+
 def get_output(market, percent_change, exchange):
 	prefix = "increased by"
 	if(percent_change < 0):
@@ -18,7 +19,8 @@ def get_output(market, percent_change, exchange):
 	everything = ["```\n", market, prefix, str(percent_change) + "%", "on " + exchange, "\n```"]
 	return " ".join(everything)
 
-def check_bittrex_markets(client, target_channel, old_markets):
+
+def check_bittrex_markets(old_markets):
 
 	outputs = []
 	price_updates = {}
@@ -44,20 +46,17 @@ def check_bittrex_markets(client, target_channel, old_markets):
 				
 				if percent_change > mooning_wow:
 					output = get_output(new_market, percent_change, "Bittrex")
-					
-					old_markets['result'][i]["Last"] = new_market #?
 
 					outuputs.append(output)
-
-					await client.send_message(target_channel, output) 
-					await asyncio.sleep(1)
+					price_updates[market] = new_price	
 					
 				else:
 					pass
+
 	return (outputs, price_updates)
 
 
-def check_binance_markets(client, target_channel, old_markets):
+def check_binance_markets(old_markets):
 
 	outputs = []
 	price_updates = {}
@@ -80,11 +79,10 @@ def check_binance_markets(client, target_channel, old_markets):
 				percent_change = round( float( ( ( new_price - old_price ) / old_price) * 100) , 2 )
 	 			
 				if percent_change > mooning_wow:
-
 					output = get_output(symb2, percent_change, "Binance")
-					old_markets[i]["price"] = new_price
-
 					outputs.append(output)
+
+					price_updates[new_market] = new_price	
 
 				else:
 					pass
@@ -109,8 +107,23 @@ async def on_ready():
 
 	while True:
 
-		check_bittrex_markets(client, target_channel, bittrex_markets)
-		check_binance_markets(client, target_channel, binance_markets)
+		# update bittrex markets
+		outputs, price_updates = check_bittrex_markets(client, target_channel, bittrex_markets)
+		for market, price in price_updates.items():
+			bittrex_markets[market] = price
+
+		
+		# update Binance markets
+		outputs2, price_updates = check_binance_markets(client, target_channel, binance_markets)
+		for market, price in price_updates.items():
+			binance_markets[market] = price
+
+		# send out outputs
+		outputs.extend(outputs2)
+		for out in outputs:
+			await client.send_message(target_channel, out)
+			await asyncio.sleep(1)
+					
 
 		#time.sleep(20)
 		await asyncio.sleep(40)
