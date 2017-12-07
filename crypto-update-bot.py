@@ -8,6 +8,9 @@ import asyncio
 CLIENT_TOKEN = "YOUR_ID_HERE"
 CHANNEL_ID = "CHANNEL_ID_HERE"
 
+MOONING = 4
+FREE_FALL = -10
+
 def get_percent_change(old_price, new_price):
 	return round( float ( ( (new_price - old_price ) / old_price ) * 100 ), 2)
 
@@ -45,7 +48,7 @@ def check_bittrex_markets(old_markets):
 
 				percent_change = get_percent_change(old_price, new_price)
 				
-				if percent_change > mooning_wow:
+				if percent_change > MOONING || percent_change < FREE_FALL:
 					output = get_output(new_market, percent_change, "Bittrex")
 
 					outuputs.append(output)
@@ -79,7 +82,7 @@ def check_binance_markets(old_markets):
 
 				percent_change = round( float( ( ( new_price - old_price ) / old_price) * 100) , 2 )
 	 			
-				if percent_change > mooning_wow:
+				if percent_change > MOONING || percent_change < FREE_FALL:
 					output = get_output(symb2, percent_change, "Binance")
 					outputs.append(output)
 
