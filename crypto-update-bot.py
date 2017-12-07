@@ -1,13 +1,13 @@
-
 import requests
 import json
 import time
 import discord
 import asyncio
 
-CLIENT_TOKEN = "YOUR_ID_HERE"
-CHANNEL_ID = "CHANNEL_ID_HERE"
+client = discord.Client()
 
+CLIENT_TOKEN = "YOUR_TOKEN"
+CHANNEL_ID = "YOUR_CHANNEL_ID"
 MOONING = 4
 FREE_FALL = -10
 
@@ -48,7 +48,7 @@ def check_bittrex_markets(old_markets):
 
 				percent_change = get_percent_change(old_price, new_price)
 				
-				if percent_change > MOONING || percent_change < FREE_FALL:
+				if percent_change > MOONING or percent_change < FREE_FALL:
 					output = get_output(new_market, percent_change, "Bittrex")
 
 					outuputs.append(output)
@@ -66,7 +66,7 @@ def check_binance_markets(old_markets):
 	price_updates = {}
 
 	new_markets = json.loads(requests.get("https://api.binance.com/api/v1/ticker/allPrices").text)
-		for i, old_market in enumerate(old_markets):
+	for i, old_market in enumerate(old_markets):
 
 			new_market = binance_prices2[i]
 
@@ -82,7 +82,7 @@ def check_binance_markets(old_markets):
 
 				percent_change = round( float( ( ( new_price - old_price ) / old_price) * 100) , 2 )
 	 			
-				if percent_change > MOONING || percent_change < FREE_FALL:
+				if percent_change > MOONING or percent_change < FREE_FALL:
 					output = get_output(symb2, percent_change, "Binance")
 					outputs.append(output)
 
@@ -112,13 +112,13 @@ async def on_ready():
 	while True:
 
 		# update bittrex markets
-		outputs, price_updates = check_bittrex_markets(client, target_channel, bittrex_markets)
+		outputs, price_updates = check_bittrex_markets(bittrex_markets)
 		for i, price in price_updates.items():
 			bittrex_marketsn["result"][i]["Last"] = price
 
 		
 		# update Binance markets
-		outputs2, price_updates = check_binance_markets(client, target_channel, binance_markets)
+		outputs2, price_updates = check_binance_markets(binance_markets)
 		for i, price in price_updates.items():
 			binance_markets[i]["price"] = price
 
