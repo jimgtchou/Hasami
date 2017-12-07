@@ -1,3 +1,4 @@
+
 import requests
 import json
 import time
@@ -48,7 +49,7 @@ def check_bittrex_markets(old_markets):
 					output = get_output(new_market, percent_change, "Bittrex")
 
 					outuputs.append(output)
-					price_updates[market] = new_price	
+					price_updates[i] = new_price	
 					
 				else:
 					pass
@@ -82,7 +83,7 @@ def check_binance_markets(old_markets):
 					output = get_output(symb2, percent_change, "Binance")
 					outputs.append(output)
 
-					price_updates[new_market] = new_price	
+					price_updates[i] = new_price	
 
 				else:
 					pass
@@ -109,14 +110,14 @@ async def on_ready():
 
 		# update bittrex markets
 		outputs, price_updates = check_bittrex_markets(client, target_channel, bittrex_markets)
-		for market, price in price_updates.items():
-			bittrex_markets[market] = price
+		for i, price in price_updates.items():
+			bittrex_marketsn["result"][i]["Last"] = price
 
 		
 		# update Binance markets
 		outputs2, price_updates = check_binance_markets(client, target_channel, binance_markets)
-		for market, price in price_updates.items():
-			binance_markets[market] = price
+		for i, price in price_updates.items():
+			binance_markets[i]["price"] = price
 
 		# send out outputs
 		outputs.extend(outputs2)
