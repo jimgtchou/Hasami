@@ -1,68 +1,72 @@
+
 import requests
 import json
 import time
 import discord
 import asyncio
 
-
 CLIENT_TOKEN = "YOUR_ID_HERE"
 CHANNEL_ID = "CHANNEL_ID_HERE"
-client = discord.Client()
 
-@client.event
+MOONING = 4
+FREE_FALL = -10
 
-async def on_ready():
-	
-	mooning_wow = 4
-	target_channel = client.get_channel(CHANNEL_ID)
+def get_percent_change(old_price, new_price):
+	return round( float ( ( (new_price - old_price ) / old_price ) * 100 ), 2)
 
-	print("Logged in? ?? ")
 
-	# await client.send_message(target_channel, 'Now Online')
+def get_output(market, percent_change, exchange):
+	prefix = "increased by"
+	if(percent_change < 0):
+		prefix = "decreased by"
 
-	bittrex_markets = json.loads(requests.get("https://bittrex.com/api/v1.1/public/getmarketsummaries").text)
-	binance_prices = json.loads(requests.get("https://api.binance.com/api/v1/ticker/allPrices").text)
+	everything = ["```\n", market, prefix, str(percent_change) + "%", "on " + exchange, "\n```"]
+	return " ".join(everything)
+
+
+def check_bittrex_markets(old_markets):
+
+	outputs = []
+	price_updates = {}
 
 	while True:
 
-		bittrex_markets2 = json.loads(requests.get("https://bittrex.com/api/v1.1/public/getmarketsummaries").text)
+		new_markets = json.loads(requests.get("https://bittrex.com/api/v1.1/public/getmarketsummaries").text)
 
 		# get percent change through all the markets
-		for i, market in enumerate(bittrex_markets["result"]):
+		for i, market in enumerate(old_markets["result"]):
 
 			old_market = market["MarketName"]
-			new_market = bittrex_markets2["result"][i]["MarketName"]
+			new_market = new_markets["result"][i]["MarketName"]
 
 			if old_market == new_market:
 				try: 
 					old_price = float(market["Last"])
-					new_price = float(bittrex_markets2['result'][i]["Last"])
+					new_price = float(new_markets['result'][i]["Last"])
 				except:
 					continue
 
-				# print(old_price, new_price)
-
-				percent_change = round( float( ( ( new_price - old_price ) / old_price ) * 100 ) , 2)
+				percent_change = get_percent_change(old_price, new_price)
 				
-				if percent_change > mooning_wow:
+				if percent_change > MOONING || percent_change < FREE_FALL:
+					output = get_output(new_market, percent_change, "Bittrex")
 
-					# market_format = "(" + new_market + ")"
-					# percent_format = "[" + str(percent_change) + "]"
-
-					everything = ["```asciidoc\n", new_market, " increased by ", str(percent_change), " on Bittrex ", "\n```"]
-					output = " ".join(everything)
+					outuputs.append(output)
+					price_updates[i] = new_price	
 					
-					bittrex_markets['result'][i]["Last"] = new_market #?
-
-					await client.send_message(target_channel, output) 
-					await asyncio.sleep(1)
-					
-
 				else:
 					pass
 
-		binance_prices2 = json.loads(requests.get("https://api.binance.com/api/v1/ticker/allPrices").text)
-		for i, old_market in enumerate(binance_prices):
+	return (outputs, price_updates)
+
+
+def check_binance_markets(old_markets):
+
+	outputs = []
+	price_updates = {}
+
+	new_markets = json.loads(requests.get("https://api.binance.com/api/v1/ticker/allPrices").text)
+		for i, old_market in enumerate(old_markets):
 
 			new_market = binance_prices2[i]
 
@@ -78,21 +82,52 @@ async def on_ready():
 
 				percent_change = round( float( ( ( new_price - old_price ) / old_price) * 100) , 2 )
 	 			
-				if percent_change > mooning_wow:
+				if percent_change > MOONING || percent_change < FREE_FALL:
+					output = get_output(symb2, percent_change, "Binance")
+					outputs.append(output)
 
-					# symb1_format = "(" + symb1 + ")"
-					# percent_format = "[" + str(percent_change) + "]"
-
-					everything = ["```asciidoc\n", symb1, " increased by ", str(percent_change), " on Binance", "\n```"]
-					output = "".join(everything)
-
-					binance_prices[i]["price"] = new_price
-
-					await client.send_message(target_channel, output)
-					await asyncio.sleep(1)
+					price_updates[i] = new_price	
 
 				else:
 					pass
+
+	return (outputs, price_updates)
+
+@client.event
+async def on_ready():
+	
+	mooning_wow = 4
+
+	client = discord.Client()
+	channel_id = "384895816998977543"
+	target_channel = client.get_channel(channel_id)
+
+	print("Logged in? ?? ")
+
+	# await client.send_message(target_channel, 'Now Online')
+
+	bittrex_markets = json.loads(requests.get("https://bittrex.com/api/v1.1/public/getmarketsummaries").text)
+	binance_markets = json.loads(requests.get("https://api.binance.com/api/v1/ticker/allPrices").text)
+
+	while True:
+
+		# update bittrex markets
+		outputs, price_updates = check_bittrex_markets(client, target_channel, bittrex_markets)
+		for i, price in price_updates.items():
+			bittrex_marketsn["result"][i]["Last"] = price
+
+		
+		# update Binance markets
+		outputs2, price_updates = check_binance_markets(client, target_channel, binance_markets)
+		for i, price in price_updates.items():
+			binance_markets[i]["price"] = price
+
+		# send out outputs
+		outputs.extend(outputs2)
+		for out in outputs:
+			await client.send_message(target_channel, out)
+			await asyncio.sleep(1)
+					
 
 		#time.sleep(20)
 		await asyncio.sleep(40)
