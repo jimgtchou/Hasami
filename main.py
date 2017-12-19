@@ -2,13 +2,11 @@
 import discord
 import asyncio
 import shlex
+import json
 import bot
 import sys
 
-CLIENT_TOKEN = "YOUR_TOKEN_HERE"
-CHANNEL_ID = "YOUR_CHANNEL_ID"
-MOONING = 4
-FREE_FALL = -10	
+CONFIG_FILE = "config.json"
 
 client = discord.Client()
 bot = bot.Bot(client)
@@ -46,8 +44,26 @@ async def on_message(message):
 		market = message.split(" ")[1]
 		await bot.generate_rsi(market)
 
+	elif content.startswith("$stop"):
+		bot.stop_checking_markets()
+
 	elif content.startswith("$exit"):
 		sys.exit()
 
+def main():
+	config = {}
+	with open(CONFIG_FILE) as f:
+		config = json.load(f)
+
+	token = config["token"]
+
+	client = discord.Client()
+	bot = bot.Bot(client, config=config)
+
+	client.run(token)
+
+
+
+
 if __name__ == '__main__':
-	client.run(TOKEN)
+	main()

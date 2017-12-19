@@ -10,10 +10,16 @@ import json
 ()
 """
 class Bot:
-	def __init__(self, client, mooning: int = 4, free_fall: int = -4):
+	def __init__(self, client: discord.Client, config: dict):
 		self._client = client
-		self._mooning = mooning
-		self._free_fall = free_fall
+		self._update_channel = config["update_channel"]
+
+		# Data for updating
+		self._mooning = config["mooning"]
+		self._free_fall = config["free_fall"]
+		self._over_bought = config["over_bought"]
+		self._over_sold = config["over_sold"]
+		self._interval = config["update_interval"]
 
 		self._markets = {}
 		self._updating = False
@@ -46,33 +52,6 @@ class Bot:
 
 		return ret
 
-
-	"""
-	()
-	()	Processes market_info from any market following protocol
-	() 
-	()	market_info = {
-	()		"exchange": str,
-	()		"market_name": str,
-	()		"old_price": double,
-	() 		"new_price": double,
-	()		"1h": double,
-	()		"24h": double,
-	()	}
-	()
-	"""
-	def _process_market(self, market_info: dict, mooning: int, free_fall: int) -> str:
-		exchange = market_info["exchange"]
-		name = market_info["market_name"]
-		old_price = market_info["old_price"]
-		new_price = market_info["new_price"]
-
-		change = self._percent_change(old_price, new_price)
-
-		if change > mooning:
-			return self._get_output([name, "increased by", str(change), "on", market])
-
-		return None	
 
 	"""
 	()
@@ -151,6 +130,44 @@ class Bot:
 
 	"""
 	()
+	()	Processes market_info from any market following protocol
+	() 
+	()	market_info = {
+	()		"exchange": str,
+	()		"market_name": str,
+	()		"old_price": double,
+	() 		"new_price": double,
+	()		"1h": double,
+	()		"24h": double,
+	()	}
+	()
+	"""
+	def _process_market(self, market_info: dict) -> str:
+		exchange = market_info["exchange"]
+		name = market_info["market_name"]
+		old_price = market_info["old_price"]
+		new_price = market_info["new_price"]
+
+		change = self._percent_change(old_price, new_price)
+
+		# possibility of RSI increase and price increase being triggered at the same time
+		outs = []
+
+		# Calculating RSI only works for bittrex rn
+		if exchange == "Bittrex":
+			rsi = self._calc_rsi(name)
+			if rsi >= self._over_bought or rsi <= self._over_sold:
+				outs.append( self._get_output ( [ name, "RSI:", str ( rsi ) ] ) )
+
+
+		if change >= self._mooning or change <= self._free_fall:
+			outs.append( self._get_output ( [ name, "changed by", str ( change ), "on", market ] ) )
+
+		return outs
+
+
+	"""
+	()
 	()	Calculates RSI and returns
 	()
 	()	RSI = 100 - ( 100 / ( 1 + RS ) )
@@ -168,30 +185,23 @@ class Bot:
 	"""
 	async def _calc_rsi(self, market: str) -> int:
 
-		loss, gain = self._process_market_history( json.loads( await self._get_market_history(market) ) )
+		loss, gain = self._process_market_history( json.loads( await self._get_market_history ( market ) ) )
 		
 		history = market["prices"][-length::1]
 
-		n = len(gains)
+		n = len(gain)
 
-		if last_avg_gain:
-			average_gain = ( ( last_avg_gain * (n - 1) ) + gains[-1] ) / n 
-		else:
-			average_gain = sum(gains) / n
+		average_gain = sum(gain) / n
 
-		if last_avg_loss:
-			average_loss = ( ( last_avg_loss * (n - 1) ) + losses[-1] ) / n
-		else:
-			average_loss = sum(losses) / n
+		average_loss = sum(loss) / n
 		
 		try:
 			RS = average_gain / average_loss
-			RSI = 100 - ( 100 / ( 1 + RS ) ) 
+			RSI = int ( 100 - ( 100 / ( 1 + RS ) ) )
+
 		except ZeroDivisionError:
 			# No losses at all bb
 			RSI = 100
-
-		RSI = int(RSI)
 		
 		return RSI
 
@@ -204,7 +214,7 @@ class Bot:
 	()	Returns tuple of outputs & price updates
 	()
 	"""
-	async def _check_binance_markets(self, session: aiohttp.ClientSession, mooning: int, free_fall: int) -> tuple:
+	async def _check_binance_markets(self, session: aiohttp.ClientSession) -> tuple:
 		outputs = []
 		price_updates = {}
 
@@ -233,9 +243,9 @@ class Bot:
 					"new_price": new_price,
 				}
 
-				out = self._process_market ( info, mooning, free_fall )
+				out = self._process_market ( info )
 				if out:
-					outputs.append(out)
+					outputs.extend(out)
 					price_updates[i] = new_price
 
 		return (outputs, price_updates)
@@ -249,7 +259,7 @@ class Bot:
 	()	Returns tuple of outputs & price updates
 	()
 	"""
-	async def _check_bittrex_markets(self, session: aiohttp.ClientSession, mooning: int, free_fall: int) -> tuple:
+	async def _check_bittrex_markets(self, session: aiohttp.ClientSession) -> tuple:
 		outputs = []
 		price_updates = {}
 
@@ -283,9 +293,9 @@ class Bot:
 					"24h": None,
 				}
 
-				out = self._process_market ( info, mooning, free_fall ) 
+				out = self._process_market ( info ) 
 				if out:
-					outputs.append(out)
+					outputs.extend(out)
 					price_updates[i] = new_price
 
 		return (outputs, price_updates)
@@ -312,23 +322,18 @@ class Bot:
 	()	Does while self._updating is true every interval minutes. Always does at least once.
 	()
 	"""
-	async def check_markets(self, message: discord.Message, interval: float = 1, mooning: int = None, free_fall: int = None) -> None:
-		if not mooning:
-			mooning = self._mooning
+	async def check_markets(self, message: discord.Message) -> None:
 
-		if not free_fall:
-			free_fall = self._free_fall
+		await self._client.send_message( message.channel , "@{0} Starting !".format(message.author) )
 
-
-		await self._client.send_message(message.channel, "@{0} Starting !".format(message.author))
 		async with aiohttp.ClientSession() as session:
 
 			# loop through at least once
 			while True:
 				price_updates = {}
 
-				outputs, price_updates["Bittrex"] = await self._check_bittrex_markets(session, mooning=mooning, free_fall=free_fall)
-				outputs2, price_updates["Binance"] = await self._check_binance_markets(session, mooning=mooning, free_fall=free_fall)
+				outputs, price_updates["Bittrex"] = await self._check_bittrex_markets(session)
+				outputs2, price_updates["Binance"] = await self._check_binance_markets(session)
 
 				outputs.extend(outputs2)
 
@@ -337,7 +342,7 @@ class Bot:
 				# upload to websocket
 				print("Outputs:", outputs)
 				for out in outputs:
-					await self._client.send_message(message.channel, out)
+					await self._client.send_message(self._update_channel, out)
 
 				# if not continously updating break
 				if not self._updating: 
@@ -348,25 +353,27 @@ class Bot:
 
 	"""
 	()
-	() Starts checking markets !
+	()	Starts checking markets !
 	()
 	"""
-	async def start_checking_markets(self, channel: str, interval: float = 1, mooning: int = None, free_fall: int = None) -> None:
-		if not mooning:
-			mooning = self._mooning
-
-		if not free_fall:
-			free_fall = self._free_fall
-
+	async def start_checking_markets(self, message: discord.Message) -> None:
 		self._updating = True
-		await self.check_markets(channel, interval=interval, mooning=mooning, free_fall=free_fall)
-
+		await self.check_markets(message)
 
 	"""
 	()
-	() Greets the person who said $greet
+	()	Stops checking markets !
+	()
+	"""
+	def stop_checking_markets(self) -> None:
+		self._updating = False
+
+	"""
+	()
+	()	Greets the person who said $greet
 	()
 	"""
 	async def greet(self, message: discord.Message) -> None:
 		await self._client.send_message(message.channel, "Hello @{0} !".format(message.author))
+
 
