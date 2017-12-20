@@ -161,7 +161,7 @@ class Bot:
 
 
 		if change >= self._mooning or change <= self._free_fall:
-			outs.append( self._get_output ( [ name, "changed by", str ( change ), "on", market ] ) )
+			outs.append( self._get_output ( [ name, "changed by", str ( change ), "on", exchange ] ) )
 
 		return outs
 

@@ -1,0 +1,9 @@
+{
+	"token": "your token",
+	"update_channel": "your channel id",
+	"free_fall": -4,
+	"mooning": 4,
+	"over_bought": 80,
+	"over_sold": 20,
+	"update_interval": 1,
+}
