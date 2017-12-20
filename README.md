@@ -9,11 +9,34 @@ For basic personal use you need to set `"token"` to your personal bot's token, a
 "update_channel": "your channel id",
 ```
 
+### Commands
+| Command | Description | 
+| --- | --- | 
+| `$greet` | Greets whomever wants to be greeted ! | 
+| `$start` | **Starts** watching markets for significant price/rsi changes. Outputs results ! |
+| `$stop` | **Stops** watching markets for significant price/rsi changes ! |
+| `$exit` | Turns the bot off. | 
+
+### Outputs
+When a market's growth/decline is greater than or equal to `mooning` or `free_fall`, the bot flags it and prints an update according to this format.
+```
+<market_name> changed by <change> on <exchange>
+```
+
+When a market's rsi value is greater than or equal to `over_bought` or `over_sold`, the bot flags it and prints an update according to this format.
+```
+<market_name> RSI: <rsi>
+```
+
+When someone calls `$greet` the bot receives the message, gets the user's name, and greets them !
+```
+Hello <user>!
+````
+
 ### Requirements
 - Python >= 3.5.3
 - [discord](https://github.com/Rapptz/discord.py)
 - [aiohttp](https://github.com/aio-libs/aiohttp)
-
 
 ### Configuration
 All configuration takes place within `config.json`
@@ -39,17 +62,6 @@ All configuration takes place within `config.json`
 | `over_bought` | Over bought value to flag market for printing **(RSI)** |
 | `over_sold` | Over sold value to flag market for printing **(RSI)** | 
 | `update_interval` | Delay between each time it checks the markets (in minutes) |
-
-### What it's doing
-When a market's growth/decline is greater than or equal to `mooning` or `free_fall`, the bot flags it and prints an update according to this format.
-```
-<market_name> changed by <change> on <exchange>
-```
-
-When a market's rsi value is greater than or equal to `over_bought` or `over_sold`, the bot flags it and prints an update according to this format.
-```
-<market_name> RSI: <rsi>
-```
 
 ## TODO (v2.0)
 1. Support for more exchanges.
