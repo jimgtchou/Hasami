@@ -106,25 +106,12 @@ async def on_ready():
 	bittrex_markets = json.loads(requests.get("https://bittrex.com/api/v1.1/public/getmarketsummaries").text)
 	binance_markets = json.loads(requests.get("https://api.binance.com/api/v1/ticker/allPrices").text)
 
-	market_history = {}
-
 	while True:
 
 		# update bittrex markets
 		outputs, price_updates = check_bittrex_markets(bittrex_markets)
 		for i, price in price_updates.items():
 			market = bittrex_markets["result"][i]
-			
-			# Calculate RSI
-			change = get_percent_change(market["Last"], price)
-			if(market not in market_history):
-				market_history[market] = {"gains": [], "losses": []}
-			else:
-				if change > 0:
-					market_history[market]["gains"]
-					
-			market["Last"] = price
-
 
 		# update Binance markets
 		outputs2, price_updates = check_binance_markets(binance_markets)
