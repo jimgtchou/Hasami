@@ -30,7 +30,7 @@ async def on_message(message):
 
 	# Default greet
 	if content.startswith("$greet"):
-		await bot.greet(message)
+		await b.greet(message)
 
 	elif content.startswith("$help"):
 		await client.send_message(message.channel, "```Starts checking bittrex and binance markets and prints the significant changes.\n" +
