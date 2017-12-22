@@ -9,6 +9,14 @@ For basic personal use you need to set `"token"` to your personal bot's token, a
 "update_channel": "your channel id",
 ```
 
+### Commands
+| Command | Description |
+| --- | --- |
+| `$start` | Starts checking the markets for price/rsi updates | 
+| `$stop` | Stops checking the markets for price/rsi updates | 
+| `$exit` | Shuts down the bot. |
+| `$greet` | Greets whoever wants to be greeted. |
+
 ### Requirements
 - Python >= 3.5.3
 - [discord](https://github.com/Rapptz/discord.py)
