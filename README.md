@@ -1,4 +1,4 @@
-# laughing-chainsaw
+# Hasami
 laughing-chainsaw is a discord bot that monitors bittrex and binance exchanges for significant changes in price / significant RSI values and prints it out in a specified channel.
 
 ## Usage
