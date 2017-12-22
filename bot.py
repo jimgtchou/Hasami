@@ -20,8 +20,11 @@ class Bot:
 		self._over_bought = config["over_bought"]
 		self._over_sold = config["over_sold"]
 		self._interval = config["update_interval"]
+		self._rsi_tick_interval = config["rsi_tick_interval"]
+		self._rsi_time_frame = config["rsi_time_frame"]
 
 		self._markets = {}
+		self._significant_markets = set() # used for rsi to prevent spam printing
 		self._updating = False
 		
 		# load markets asynchronously fun
@@ -46,16 +49,14 @@ class Bot:
 	()
 	"""
 	def _get_output(self, *args: list) -> str:
-		ret = " ".join(args)
-		ret.insert(0, "```\n")
-		ret.append("```")
+		ret = "```\n"
+		ret += " ".join(*args)
+		ret += ("\n```")
 
 		return ret
 
 
 	"""
-	()
-	()	** Make Asynchronous
 	()
 	()	Asynchronously loads the markets from bittrex and binance markets.
 	()	This loaded data is used to check percent change.
@@ -65,6 +66,7 @@ class Bot:
 		async with aiohttp.ClientSession() as session:
 			self._markets["Binance"] = json.loads( await self._get_binance_markets(session) )
 			self._markets["Bittrex"] = json.loads( await self._get_bittrex_markets(session) )
+
 
 	"""
 	()
@@ -91,9 +93,10 @@ class Bot:
 	()	Asynchronously receives market history from bittrex
 	()
 	"""
-	async def _get_market_history(self, session:aiohttp.ClientSession, market: str) -> str:
-		async with session.get("https://bittrex.com/api/v1.1/public/getmarkethistory?market={0}".format(market)) as resp:
+	async def _get_market_history(self, session:aiohttp.ClientSession, market: str, tick_interval: str) -> str:
+		async with session.get("https://bittrex.com/Api/v2.0/pub/market/GetTicks?marketName={0}&tickInterval={1}".format(market, tick_interval)) as resp:
 			return await resp.text()
+
 
 	"""
 	()
@@ -106,17 +109,21 @@ class Bot:
 
 		loss = []
 		gain = []
+		
+		if not m_hist["result"]:
+			return (loss, gain)
 
-		result = m_hist["result"]
+		result = m_hist["result"][-self._rsi_time_frame:]
 
 		last_price = None
-		for buy in result.reverse():
-			price = buy["Price"]
+
+		for buy in reversed(result):
+			price = buy["O"] # gets opening price
 			if last_price:
 				change = self._percent_change(price, last_price)
 
 				if change < 0:
-					loss.append(change)
+					loss.append(abs(change))
 					gain.append(0)
 
 				else:
@@ -130,7 +137,7 @@ class Bot:
 
 	"""
 	()
-	()	Processes market_info from any market following protocol
+	()	Asynchronously processes market_info from any market following protocol
 	() 
 	()	market_info = {
 	()		"exchange": str,
@@ -142,7 +149,7 @@ class Bot:
 	()	}
 	()
 	"""
-	def _process_market(self, market_info: dict) -> str:
+	async def _process_market(self, session:aiohttp.ClientSession, market_info: dict) -> str:
 		exchange = market_info["exchange"]
 		name = market_info["market_name"]
 		old_price = market_info["old_price"]
@@ -155,9 +162,16 @@ class Bot:
 
 		# Calculating RSI only works for bittrex rn
 		if exchange == "Bittrex":
-			rsi = self._calc_rsi(name)
+			rsi = await self._calc_rsi(session, name)
 			if rsi >= self._over_bought or rsi <= self._over_sold:
-				outs.append( self._get_output ( [ name, "RSI:", str ( rsi ) ] ) )
+				# make sure that rsi hasn't been significant yet
+				if name not in self._significant_markets:
+					outs.append( self._get_output ( [ name, "RSI:", str ( rsi ) ] ) )
+					self._significant_markets.add(name)
+
+			elif name in self._significant_markets:
+				self._significant_markets.remove(name)
+
 
 
 		if change >= self._mooning or change <= self._free_fall:
@@ -183,13 +197,14 @@ class Bot:
 	()		Everything after = (Prev Avg Gain * n-1 + current loss) / n
 	()
 	"""
-	async def _calc_rsi(self, market: str) -> int:
+	async def _calc_rsi(self, session: aiohttp.ClientSession, market: str) -> int:
+		history = json.loads( await self._get_market_history ( session, market, self._rsi_tick_interval ) )
 
-		loss, gain = self._process_market_history( json.loads( await self._get_market_history ( market ) ) )
-		
-		history = market["prices"][-length::1]
+		loss, gain = self._process_market_history( history )
 
 		n = len(gain)
+		if n == 0:
+			return 0
 
 		average_gain = sum(gain) / n
 
@@ -243,7 +258,7 @@ class Bot:
 					"new_price": new_price,
 				}
 
-				out = self._process_market ( info )
+				out = await self._process_market ( session, info )
 				if out:
 					outputs.extend(out)
 					price_updates[i] = new_price
@@ -293,7 +308,7 @@ class Bot:
 					"24h": None,
 				}
 
-				out = self._process_market ( info ) 
+				out = await self._process_market ( session, info ) 
 				if out:
 					outputs.extend(out)
 					price_updates[i] = new_price
@@ -307,12 +322,12 @@ class Bot:
 	()
 	"""
 	def _update_prices(self, price_updates: dict) -> None:
-		bittrex_markets = self._markets["Bittrex"]
-		for i, price in price_updates["Bittrex"]:
+		bittrex_markets = self._markets["Bittrex"]["result"]
+		for i, price in price_updates["Bittrex"].items():
 			bittrex_markets[i]["Last"] = price
 
 		binance_markets = self._markets["Binance"]
-		for i, price in price_updates["Binance"]:
+		for i, price in price_updates["Binance"].items():
 			binance_markets[i]["price"] = price
 
 
@@ -322,10 +337,7 @@ class Bot:
 	()	Does while self._updating is true every interval minutes. Always does at least once.
 	()
 	"""
-	async def check_markets(self, message: discord.Message) -> None:
-
-		await self._client.send_message( message.channel , "@{0} Starting !".format(message.author) )
-
+	async def check_markets(self) -> None:
 		async with aiohttp.ClientSession() as session:
 
 			# loop through at least once
@@ -339,16 +351,14 @@ class Bot:
 
 				self._update_prices(price_updates)
 
-				# upload to websocket
-				print("Outputs:", outputs)
 				for out in outputs:
-					await self._client.send_message(self._update_channel, out)
+					await self._client.send_message(discord.Object(id=self._update_channel), out)
 
 				# if not continously updating break
 				if not self._updating: 
 					break
 
-				await asyncio.sleep ( int ( interval * 60 ) )
+				await asyncio.sleep ( int ( self._interval * 60 ) )
 
 
 	"""
@@ -358,7 +368,9 @@ class Bot:
 	"""
 	async def start_checking_markets(self, message: discord.Message) -> None:
 		self._updating = True
-		await self.check_markets(message)
+		await self._client.send_message( message.channel , "Starting {0.author.mention} !".format(message) )
+		await self.check_markets()
+
 
 	"""
 	()
@@ -368,12 +380,13 @@ class Bot:
 	def stop_checking_markets(self) -> None:
 		self._updating = False
 
+
 	"""
 	()
 	()	Greets the person who said $greet
 	()
 	"""
 	async def greet(self, message: discord.Message) -> None:
-		await self._client.send_message(message.channel, "Hello @{0} !".format(message.author))
+		await self._client.send_message(message.channel, "Hello {0.author.mention} !".format(message))
 
 
