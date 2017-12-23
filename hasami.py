@@ -1,8 +1,15 @@
 
-import discord
+import logging
 import asyncio
-import aiohttp
 import json
+import sys
+
+import discord
+import aiohttp
+
+
+CONFIG_FILE = "config.json"
+
 
 """
 ()
@@ -22,7 +29,11 @@ class Bot:
 		self._interval = config["update_interval"]
 		self._rsi_tick_interval = config["rsi_tick_interval"]
 		self._rsi_time_frame = config["rsi_time_frame"]
+		
+		# set up logging
+		self._setup_logging(config)
 
+		# Data for processing markets
 		self._markets = {}
 		self._significant_markets = set() # used for rsi to prevent spam printing
 		self._updating = False
@@ -32,6 +43,26 @@ class Bot:
 		task = loop.create_task(self._load_markets())
 		future = asyncio.ensure_future(task)
 		loop.run_until_complete(future)
+
+
+	"""
+	()
+	()	Setups logging files/level
+	()
+	"""
+	def _setup_logging(self, config: dict) -> None:
+		self._logger = logging.getLogger(__name__)
+		level = logging.INFO if config["debug"] == 0 else logging.DEBUG
+		
+		handler = logging.FileHandler("log.log")
+		formatter = logging.Formatter(
+			"%(asctime)s - %(name)s - %(levelname)% - %(message)s"
+			)
+
+		handler.setFormatter(formatter)
+		handler.setLevel(level)
+
+		self._logger.addHandler(handler)
 
 
 	"""
@@ -64,8 +95,8 @@ class Bot:
 	"""
 	async def _load_markets(self) -> None:
 		async with aiohttp.ClientSession() as session:
-			self._markets["Binance"] = json.loads( await self._get_binance_markets(session) )
-			self._markets["Bittrex"] = json.loads( await self._get_bittrex_markets(session) )
+			self._markets["Binance"] = await self._get_binance_markets(session)
+			self._markets["Bittrex"] = await self._get_bittrex_markets(session)
 
 
 	"""
@@ -75,7 +106,11 @@ class Bot:
 	"""
 	async def _get_binance_markets(self, session: aiohttp.ClientSession) -> str:
 		async with session.get("https://api.binance.com/api/v1/ticker/allPrices") as resp:
-			return await resp.text()
+			try:
+				return await resp.json()
+			except aiohttp.errors.ServerDisconnectedError:
+				self._logger.warning("binancemarket summaries ServerDisconnectedError")
+				return {}
 
 
 	"""
@@ -85,7 +120,11 @@ class Bot:
 	"""
 	async def _get_bittrex_markets(self, session: aiohttp.ClientSession) -> str:
 		async with session.get("https://bittrex.com/api/v1.1/public/getmarketsummaries") as resp:
-			return await resp.text()
+			try:
+				return await resp.json()
+			except aiohttp.errors.ServerDisconnectedError:
+				self._logger.warning("bittrex market summaries ServerDisconnectedError")
+				return {}
 
 
 	"""
@@ -95,44 +134,11 @@ class Bot:
 	"""
 	async def _get_market_history(self, session:aiohttp.ClientSession, market: str, tick_interval: str) -> str:
 		async with session.get("https://bittrex.com/Api/v2.0/pub/market/GetTicks?marketName={0}&tickInterval={1}".format(market, tick_interval)) as resp:
-			return await resp.text()
-
-
-	"""
-	()
-	()	Processes market_history from bittrex
-	()
-	()	Returns a tuple of losses and gains: (loss, gain)
-	()
-	"""
-	def _process_market_history(self, m_hist: dict) -> tuple: 
-
-		loss = []
-		gain = []
-		
-		if not m_hist["result"]:
-			return (loss, gain)
-
-		result = m_hist["result"][-self._rsi_time_frame:]
-
-		last_price = None
-
-		for buy in reversed(result):
-			price = buy["O"] # gets opening price
-			if last_price:
-				change = self._percent_change(price, last_price)
-
-				if change < 0:
-					loss.append(abs(change))
-					gain.append(0)
-
-				else:
-					gain.append(change)
-					loss.append(0)
-
-			last_price = price
-
-		return (loss, gain)
+			try:
+				return await resp.json()
+			except aiohttp.errors.ServerDisconnectedError:
+				self._logger.warning("bittrex market history ServerDisconnectedError")
+				return {}
 
 
 	"""
@@ -163,10 +169,16 @@ class Bot:
 		# Calculating RSI only works for bittrex rn
 		if exchange == "Bittrex":
 			rsi = await self._calc_rsi(session, name)
+
 			if rsi >= self._over_bought or rsi <= self._over_sold:
+
 				# make sure that rsi hasn't been significant yet
 				if name not in self._significant_markets:
-					outs.append( self._get_output ( [ name, "RSI:", str ( rsi ) ] ) )
+					outs.append( 
+						self._get_output ( 
+							[name, "RSI:", str(rsi)] 
+							)
+						)
 					self._significant_markets.add(name)
 
 			elif name in self._significant_markets:
@@ -175,9 +187,51 @@ class Bot:
 
 
 		if change >= self._mooning or change <= self._free_fall:
-			outs.append( self._get_output ( [ name, "changed by", str ( change ), "on", exchange ] ) )
+			outs.append( 
+				self._get_output ( 
+					[ name, "changed by", str ( change ), "on", exchange ] 
+					) 
+				)
 
 		return outs
+
+
+	"""
+	()
+	()	Processes market_history from bittrex and sorts them between
+	()	losses and gains
+	()
+	()	Returns a tuple of losses and gains: (loss, gain)
+	()
+	"""
+	def _process_market_history(self, m_hist: dict) -> tuple: 
+
+		loss = []
+		gain = []
+		
+		if not m_hist["result"]:
+			return (loss, gain)
+
+		result = m_hist["result"]
+
+		last_price = None
+
+		for buy in reversed(result):
+			price = buy["O"] # gets opening price
+			if last_price:
+				change = self._percent_change(price, last_price)
+
+				if change < 0:
+					loss.append(abs(change))
+					gain.append(0)
+
+				else:
+					gain.append(change)
+					loss.append(0)
+
+			last_price = price
+
+		return (loss, gain)
 
 
 	"""
@@ -198,9 +252,11 @@ class Bot:
 	()
 	"""
 	async def _calc_rsi(self, session: aiohttp.ClientSession, market: str) -> int:
-		history = json.loads( await self._get_market_history ( session, market, self._rsi_tick_interval ) )
+		history = await self._get_market_history(
+			session, market, self._rsi_tick_interval
+			)
 
-		loss, gain = self._process_market_history( history )
+		loss, gain = self._process_market_history(history)
 
 		n = len(gain)
 		if n == 0:
@@ -233,7 +289,7 @@ class Bot:
 		outputs = []
 		price_updates = {}
 
-		new_markets = json.loads( await self._get_binance_markets(session) )
+		new_markets = await self._get_binance_markets(session)
 
 		old_markets = self._markets["Binance"]
 
@@ -278,7 +334,7 @@ class Bot:
 		outputs = []
 		price_updates = {}
 
-		new_markets = json.loads( await self._get_bittrex_markets(session) )
+		new_markets = await self._get_bittrex_markets(session)
 
 		old_markets = self._markets["Bittrex"]
 
@@ -333,8 +389,10 @@ class Bot:
 
 	"""
 	()
-	()	Checks both bittrex and binance markets, updates prices and sends outputs to websocket.
-	()	Does while self._updating is true every interval minutes. Always does at least once.
+	()	Processes bittrex and binance markets, and sends outputs to discord.	
+	()
+	()	Does while self._updating is true every interval minutes. 
+	()	Always does at least once.
 	()
 	"""
 	async def check_markets(self) -> None:
@@ -367,8 +425,9 @@ class Bot:
 	()
 	"""
 	async def start_checking_markets(self, message: discord.Message) -> None:
-		self._updating = True
-		await self._client.send_message( message.channel , "Starting {0.author.mention} !".format(message) )
+		await self._client.send_message(
+			message.channel , "Starting {0.author.mention} !".format(message)
+			)
 		await self.check_markets()
 
 
@@ -387,6 +446,53 @@ class Bot:
 	()
 	"""
 	async def greet(self, message: discord.Message) -> None:
-		await self._client.send_message(message.channel, "Hello {0.author.mention} !".format(message))
+		await self._client.send_message(
+			message.channel, "Hello {0.author.mention} !".format(message)
+			)
 
 
+if __name__ == '__main__':
+	client = discord.Client()
+	b = None;
+
+	config = {}
+	with open(CONFIG_FILE) as f:
+		config = json.load(f)
+
+	bot = Bot(client=client, config=config)
+
+
+	@client.event
+	async def on_ready():
+		print("Logged in")
+
+
+	@client.event
+	async def on_message(message):
+		content = message.content
+
+		# Default greet
+		if content.startswith("$greet"):
+			await bot.greet(message)
+
+		elif content.startswith("$help"):
+			await client.send_message(
+				message.channel, "```Starts checking bittrex and binance markets and prints the significant changes.\n" +
+					"Args\n" + 
+					"-h\tPrints this\n" + 
+					"-i\tPeriod of time spent inbetween checking the markets\n" + 
+					"-h\tHigh point to print notification\n" + 
+					"-l\tLow point to print notification"
+					)
+
+		elif content.startswith("$start"):
+			await bot.start_checking_markets(message)
+
+		elif content.startswith("$stop"):
+			bot.stop_checking_markets()
+
+		elif content.startswith("$exit"):
+			sys.exit()
+
+	token = config["token"]
+	client.run(token)
