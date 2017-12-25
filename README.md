@@ -2,7 +2,7 @@
 Hasami is a discord bot that monitors bittrex and binance exchanges for significant changes in price / significant RSI values and prints it out in a specified channel.
 
 ## Usage
-For basic personal use you need to set `"token"` to your personal bot's token, and `"update_channel"` to the channel the bot should print updates to in **config.json**
+For basic personal use you need to set `"token"` to your personal bot's token, and `"update_channel"` to the channel the bot should print updates to in [config.json](/config.json)
 
 ```json
 "token": "your token",
@@ -24,7 +24,7 @@ For basic personal use you need to set `"token"` to your personal bot's token, a
 
 
 ### Configuration
-All configuration takes place within **config.json**
+All configuration takes place within [config.json](/config.json)
 
 ```json
 {
@@ -36,7 +36,8 @@ All configuration takes place within **config.json**
 	"rsi_time_frame": 14, 
 	"over_bought": 75,
 	"over_sold": 25,
-	"update_interval": 1
+	"update_interval": 1,
+	"debug": 0
 }
 ```
 
@@ -51,6 +52,7 @@ All configuration takes place within **config.json**
 | `over_bought` | Over bought value to flag market for printing **(RSI)** |
 | `over_sold` | Over sold value to flag market for printing **(RSI)** | 
 | `update_interval` | Delay between each time it checks the markets (in minutes) |
+| `debug` | Whether in debug mode or not. Increases info logged. |
 
 ### What it's doing
 When a market's growth/decline is greater than or equal to `mooning` or `free_fall`, the bot flags it and prints an update according to this format.
@@ -64,8 +66,8 @@ When a market's rsi value is greater than or equal to `over_bought` or `over_sol
 ```
 
 ## TODO
-1. Support for more exchanges.
-2. Switch to v2.0 of bittrex api.
-3. Support for other trading tools.
-4. Price display under `playing` on bot.
-5. Colors? 
+1. Price display under `playing` on bot.
+2. Improved discord printing.
+3. Support for more exchanges.
+4. Move to v2.0 of bittrex api.
+

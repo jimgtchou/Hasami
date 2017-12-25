@@ -8,6 +8,5 @@
 	"over_bought": 75,
 	"over_sold": 25,
 	"update_interval": 1,
-	"log": 1,
 	"debug": 0
 }
