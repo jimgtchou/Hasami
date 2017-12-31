@@ -210,20 +210,20 @@ class Bot:
 
 		last_price = None
 
-		for buy in reversed(result):
-			price = buy["O"] # gets opening price
-			if last_price:
-				change = self._percent_change(price, last_price)
+		for i in range(self._rsi_time_frame):
+			curr_buy = result[-(i+1)]
+			prev_buy = result[-(i+2)]
 
-				if change < 0:
-					loss.append(abs(change))
-					gain.append(0)
+			curr_price = curr_buy["O"] # gets opening price
+			prev_price = prev_buy["O"]
 
-				else:
-					gain.append(change)
-					loss.append(0)
+			change = last_price - price
+			if change < 0:
+				loss.append(abs(change))
 
-			last_price = price
+			else:
+				gain.append(change)
+
 
 		return (loss, gain)
 
@@ -253,28 +253,45 @@ class Bot:
 	
 
 		"""
+
+		interval = self._rsi_time_frame
 		history = await self._get_market_history(
 			session, market, self._rsi_tick_interval
 			)
 
-		loss, gain = self._process_market_history(history)
+		res = history["result"]
+		closing_prices = [buy["C"] for buy in res]
 
-		n = len(gain)
-		if n == 0:
-			return 0
-
-		average_gain = sum(gain) / n
-
-		average_loss = sum(loss) / n
+		# sort first interval prices
+		losses = []
+		gains = []
 		
-		try:
-			RS = average_gain / average_loss
-			RSI = int ( 100 - ( 100 / ( 1 + RS ) ) )
+		for i in range(1, interval):
+			change = closing_prices[i] - closing_prices[i-1]
+			if change < 0:
+				losses.append(abs(change))
+			elif change > 0:
+				gains.append(change)
 
-		except ZeroDivisionError:
-			# No losses at all bb
-			RSI = 100
-		
+
+		# calc intial avg changes / losses
+		avg_gain = sum(gains) / interval
+		avg_loss = sum(losses) / interval
+
+		# smooth calc avg change / losses
+		for i in range(interval, len(closing_prices)):
+			change = closing_prices[i] - closing_prices[i-1]
+
+			# sort loss and gain
+			loss = abs(change) if change < 0 else 0
+			gain = change if change > 0 else 0
+
+			avg_gain = (avg_gain * (interval - 1) + gain) / interval
+			avg_loss = (avg_loss * (interval - 1) + loss) / interval
+
+		RS = avg_gain / avg_loss
+		RSI = int ( 100 - ( 100 / ( 1 + RS ) ) )
+
 		return RSI
 	
 
