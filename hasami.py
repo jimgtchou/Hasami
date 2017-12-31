@@ -186,48 +186,6 @@ class Bot:
 		return await self._query_exchange(session, url)
 
 
-	def _process_market_history(self, m_hist: dict) -> tuple:
-		"""
-		
-		Processes market_history from bittrex and sorts them between
-		losses and gains.
-
-		Args:
-			m_hist: The history of market to process.
-		
-		Returns: 
-			Tuple of losses and gains: (loss, gain)
-		
-		"""
-
-		loss = []
-		gain = []
-		
-		if not m_hist["result"]:
-			return (loss, gain)
-
-		result = m_hist["result"]
-
-		last_price = None
-
-		for i in range(self._rsi_time_frame):
-			curr_buy = result[-(i+1)]
-			prev_buy = result[-(i+2)]
-
-			curr_price = curr_buy["O"] # gets opening price
-			prev_price = prev_buy["O"]
-
-			change = last_price - price
-			if change < 0:
-				loss.append(abs(change))
-
-			else:
-				gain.append(change)
-
-
-		return (loss, gain)
-
-
 	async def _calc_rsi(self, session: aiohttp.ClientSession, market: str) -> int:
 		"""	
 		Calculates & Returns the RSI of market according to the RSI formula
@@ -265,7 +223,7 @@ class Bot:
 		# sort first interval prices
 		losses = []
 		gains = []
-		
+
 		for i in range(1, interval):
 			change = closing_prices[i] - closing_prices[i-1]
 			if change < 0:
