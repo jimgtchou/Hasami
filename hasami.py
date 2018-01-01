@@ -9,6 +9,8 @@ import sys
 import discord
 import aiohttp
 
+import datetime
+
 
 CONFIG_FILE = "config.json"
 LOGGING_CONFIG = "log_conf.yaml"
@@ -16,7 +18,7 @@ LOGGING_CONFIG = "log_conf.yaml"
 
 class Bot:
 	"""
-	Bot used to analyze the bittrex and binance markets for significant price changes and
+	Bot used to analyze the Binance markets for significant price changes and
 	RSI values.
 
 	These significant markets are then printed out into a discord server.
@@ -38,7 +40,7 @@ class Bot:
 	def __init__(self, client: discord.Client, config: dict, logger: logging.Logger):
 		self._client = client
 		self._logger = logger
-	
+
 		# config stuff
 		self._mooning = config["mooning"]
 		self._free_fall = config["free_fall"]
@@ -48,17 +50,29 @@ class Bot:
 		self._update_channel = config["update_channel"]
 		self._rsi_time_frame = config["rsi_time_frame"]
 		self._rsi_tick_interval = config["rsi_tick_interval"]
+		self._vol_threshold = config["vol_threshold"]
 
 		# Data for processing markets
 		self._markets = {}
+
 		self._significant_markets = set() # used for rsi to prevent spam printing
 		self._updating = False
+
+		self._markets_volume = {}
+		self._rsi_tick_interval_Binance_mapping = {
+			'oneMin':'1m',
+			'fiveMin':'5m',
+			'fifteenMin':'15m',
+			'thirtyMin':'30m',
+			'day':'1d'
+			}
+
 
 
 	def _percent_change(self, new_price: int, old_price: int) -> float:
 		"""
 		Calculates and returns change in value between new_price and old_price
-	
+
 		Args:
 			new_price: new price to be compared to old price.
 			old_price: old price to be compared to new price.
@@ -91,7 +105,7 @@ class Bot:
 	async def _query_exchange(self, session: aiohttp.ClientSession, url: str, depth: int = 0,
 		max_depth: int = 3) -> dict:
 		"""
-		Tries to GET data from the exchange with url. If it fails it 
+		Tries to GET data from the exchange with url. If it fails it
 		recursively retries max_depth number of times.
 
 		Args:
@@ -110,7 +124,11 @@ class Bot:
 
 		try:
 			async with session.get(url) as resp:
-				return await resp.json()
+				data = await resp.json()
+				if 'code' in data:
+					print(data['msg'])
+					sys.exit()
+				return data
 		except aiohttp.errors.ServerDisconnectedError:
 			self._logger.warning("{0} ServerDisconnectedError".format(url))
 			return await self._query_exchange(session, url, depth=depth+1)
@@ -118,7 +136,7 @@ class Bot:
 
 	async def _load_markets(self, session: aiohttp.ClientSession) -> None:
 		"""
-		Asynchronously loads the markets from bittrex and binance markets.
+		Asynchronously loads the markets from  Binance markets.
 		This loaded data is used to check percent change.
 
 		Args:
@@ -126,10 +144,21 @@ class Bot:
 
 		Returns:
 			None
-		
+
 		"""
-		self._markets["Binance"] = await self._get_binance_markets(session)
-		self._markets["Bittrex"] = await self._get_bittrex_markets(session)
+		self._markets["Binance"] = {}
+		temp_binance_markets = await self._get_binance_markets(session)
+		temp_binance_markets_volume = await self._get_binance_markets_volume(session)
+
+		for mvol in temp_binance_markets_volume:
+			if mvol['symbol'].startswith('BTC') or mvol['symbol'].endswith('BTC'):
+				self._markets_volume[mvol['symbol']] = round(float(mvol['quoteVolume']),2)
+
+		for m in temp_binance_markets:
+			if m['symbol'].startswith('BTC') or m['symbol'].endswith('BTC'):
+				if self._markets_volume[m['symbol']] > self._vol_threshold:
+					market = {'symbol':m['symbol'], 'price':m['price']}
+					self._markets["Binance"][m['symbol']] = m
 
 
 	async def _get_binance_markets(self, session: aiohttp.ClientSession) -> dict:
@@ -147,117 +176,152 @@ class Bot:
 		"""
 		url = "https://api.binance.com/api/v1/ticker/allPrices"
 		return await self._query_exchange(session, url)
-		
 
-	async def _get_bittrex_markets(self, session: aiohttp.ClientSession) -> dict:
+	async def _get_binance_markets_volume(self, session: aiohttp.ClientSession) -> dict:
 		"""
-		Asynchronously GETS the market summaries from bittrex and returns
+		Asynchronously GETS the market summaries from binance and returns
 		it as a dictionary.
 
 		Args:
 			session: The aiohttp ClientSession to be used to GET data from exchange
-			market summaries from bittrex.
+			market summaries from binance.
 
 		Returns:
-			A dictionary of the market summaries from bittrex.
+			A dictionary of the market summaries from binance.
 
 		"""
-		url = "https://bittrex.com/api/v1.1/public/getmarketsummaries"
+		url = "https://api.binance.com/api/v1/ticker/24hr"
 		return await self._query_exchange(session, url)
 
 
 	async def _get_market_history(self, session:aiohttp.ClientSession, market: str,
-		tick_interval: str) -> dict:
+		tick_interval: str, exchange: str) -> dict:
 		"""
-		Asynchronously receives market history from bittrex and returns it as a dict.
+		Asynchronously receives market history from Binance and returns it as a dict.
 
 		Args:
 			session: The aiohttp ClientSession to be used to GET data from exchange
-			market history from bittrex.
+			market history from Binance.
 			market: The market who's history it should receive.
-			tick_interval: Tick interval used when querying bittrex.
+			tick_interval: Tick interval used when querying Binance.
 
 		Returns:
 			Dict of the market history with tick interval of tick interval.
-	
+
 		"""
-		url = "https://bittrex.com/Api/v2.0/pub/market/GetTicks?marketName={0}&tickInterval={1}".format(
-			market, tick_interval)
+
+		if exchange == "Binance":
+			url = "https://api.binance.com/api/v1/klines?symbol={0}&interval={1}&limit={2}".format(
+				market, self._rsi_tick_interval_Binance_mapping[tick_interval], 500)
+
 		return await self._query_exchange(session, url)
 
 
-	async def _calc_rsi(self, session: aiohttp.ClientSession, market: str) -> int:
-		"""	
+	def _process_market_history(self, m_hist: dict, exchange: str) -> tuple:
+		"""
+
+		Processes market_history from Binance and sorts them between
+		losses and gains.
+
+		Args:
+			m_hist: The history of market to process.
+
+		Returns:
+			Tuple of losses and gains: (loss, gain)
+
+		"""
+
+		loss = []
+		gain = []
+
+		if exchange == "Binance":
+			if not m_hist:
+				return (loss, gain)
+
+			result = m_hist
+
+			last_price = None
+
+		for buy in reversed(result):
+			if exchange == "Binance":
+				price = float(buy[1]) # gets current price
+			if last_price:
+				change = self._percent_change(price, last_price)
+
+				if change < 0:
+					loss.append(abs(change))
+					gain.append(0)
+
+				else:
+					gain.append(change)
+					loss.append(0)
+
+			last_price = price
+
+		return (loss, gain)
+
+
+	async def _calc_rsi(self, session: aiohttp.ClientSession, market: str, exchange: str) -> int:
+		"""
 		Calculates & Returns the RSI of market according to the RSI formula
-		
+
 		RSI = 100 - ( 100 / ( 1 + RS ) )
-	
+
 		RS = Average Gains / Average Losses
-	
+
 		Average Gains
 			1st avg gain = sum of gains over past n periods / n
 			Everything after = (Prev Avg Gain * n-1 + current gain) / n
-	
+
 		Average Loss
 			1st avg loss = sum of losses over past n period / n
 			Everything after = (Prev Avg Gain * n-1 + current loss) / n
-		
+
 		Args:
 			session: The aiohttp ClientSession to be used to GET data from exchanges.
 			market: The market to calculate RSI for.
 
 		Returns:
 			The RSI of market.
-	
+
 
 		"""
-
-		interval = self._rsi_time_frame
 		history = await self._get_market_history(
-			session, market, self._rsi_tick_interval
+			session, market, self._rsi_tick_interval, exchange
 			)
 
-		res = history["result"]
-		closing_prices = [buy["C"] for buy in res]
+		loss, gain = self._process_market_history(history, exchange)
 
-		# sort first interval prices
-		losses = []
-		gains = []
+		n = len(gain)
+		frame = self._rsi_time_frame
+		if n == 0:
+			return 0
 
-		for i in range(1, interval):
-			change = closing_prices[i] - closing_prices[i-1]
-			if change < 0:
-				losses.append(abs(change))
-			elif change > 0:
-				gains.append(change)
+		average_gain = sum(gain[0:frame]) / frame
+		average_loss = sum(loss[0:frame]) / frame
 
+		smooth = lambda x,y: (x*(frame-1)+y)/frame
 
-		# calc intial avg changes / losses
-		avg_gain = sum(gains) / interval
-		avg_loss = sum(losses) / interval
+		for g, l in list(zip(gain, loss))[frame:]:
+			average_gain = smooth(average_gain,g)
+			average_loss = smooth(average_loss,l)
 
-		# smooth calc avg change / losses
-		for i in range(interval, len(closing_prices)):
-			change = closing_prices[i] - closing_prices[i-1]
+		try:
+			RS = average_gain / average_loss
+			RSI = int ( 100 - ( 100 / ( 1 + RS ) ) )
 
-			# sort loss and gain
-			loss = abs(change) if change < 0 else 0
-			gain = change if change > 0 else 0
-
-			avg_gain = (avg_gain * (interval - 1) + gain) / interval
-			avg_loss = (avg_loss * (interval - 1) + loss) / interval
-
-		RS = avg_gain / avg_loss
-		RSI = int ( 100 - ( 100 / ( 1 + RS ) ) )
+		except ZeroDivisionError:
+			# No losses at all bb
+			RSI = 100
 
 		return RSI
-	
+
 
 	async def _process_market(self, session: aiohttp.ClientSession, market_info: dict) -> list:
 		"""
 		Asynchronously processes market_info from any market following protocol.
 		Generates outputs for significant RSIs/price changes.
-		 
+
 		market_info = {
 			"exchange": str,
 			"market_name": str,
@@ -266,7 +330,7 @@ class Bot:
 			"1h": double,
 			"24h": double,
 		}
-	
+
 		Args:
 			session: The aiohttp ClientSession to be used to GET data from exchange
 			market_info: Market info, follows format {
@@ -295,37 +359,32 @@ class Bot:
 		# possibility of RSI increase and price increase being triggered at the same time
 		outs = []
 
-		# Calculating RSI only works for bittrex rn
-		if exchange == "Bittrex":
-			rsi = await self._calc_rsi(session, name)
-			self._logger.debug("RSI {0}".format(rsi))
+		# Calculating RSI for Binance
+		rsi = await self._calc_rsi(session, name, exchange)
+		self._logger.debug("RSI {0}".format(rsi))
+		if rsi >= self._over_bought or rsi <= self._over_sold or change >= self._mooning or change <= self._free_fall:
+			sig_rsi = ""
+			sig_change = ""
 			if rsi >= self._over_bought or rsi <= self._over_sold:
-
-				# make sure that rsi hasn't been significant yet
-				if name not in self._significant_markets:
+				sig_rsi = "*"
+			if change >= self._mooning or change <= self._free_fall:
+				sig_change = "*"
+			# make sure that rsi hasn't been significant yet
+			if name not in self._significant_markets:
+				if self._markets_volume[name] > self._vol_threshold:
 					self._logger.debug("Not significant yet, creating output")
-					outs.append( 
-						self._get_output ( 
-							[name, "RSI:", str(rsi)] 
+					outs.append(
+						self._get_output (
+							["{}:".format(name), "{}RSI={}".format(sig_rsi,rsi), "{}Change={}".format(sig_change,round(change,2)) , "Vol={}".format(self._markets_volume[name])]
 							)
 						)
 					self._significant_markets.add(name)
 
-			elif name in self._significant_markets:
-				self._logger.debug(
-					"Previously significant, no longer significant, removing."
-					)
-				self._significant_markets.remove(name)
-
-
-
-		if change >= self._mooning or change <= self._free_fall:
-			self._logger.debug("Change significant, creating output")
-			outs.append( 
-				self._get_output ( 
-					[ name, "changed by", str ( change ), "on", exchange ] 
-					) 
+		elif name in self._significant_markets:
+			self._logger.debug(
+				"Previously significant, no longer significant, removing."
 				)
+			self._significant_markets.remove(name)
 
 		self._logger.debug("Outputs: {0}".format(outs))
 		return outs
@@ -337,26 +396,41 @@ class Bot:
 
 		Args:
 			session: The aiohttp ClientSession to be used to GET data from binance
-		
+
 		Returns:
 			tuple of outputs & price updates
-		
+
 		"""
 		outputs = []
-		price_updates = {}
+		now = datetime.datetime.now()
+		outputs.append("```\n---Time {}---\n```".format(now.strftime("%Y-%m-%d %H:%M")))
 
-		new_markets = await self._get_binance_markets(session)
+		price_updates = {}
+		new_markets = {}
+		temp_binance_markets = await self._get_binance_markets(session)
+		temp_binance_markets_volume = await self._get_binance_markets_volume(session)
+
+		for mvol in temp_binance_markets_volume:
+			if mvol['symbol'].startswith('BTC') or mvol['symbol'].endswith('BTC'):
+				self._markets_volume[mvol['symbol']] = round(float(mvol['quoteVolume']),2)
+
+		for m in temp_binance_markets:
+			if m['symbol'].startswith('BTC') or m['symbol'].endswith('BTC'):
+				if self._markets_volume[m['symbol']] > self._vol_threshold:
+					new_markets[m['symbol']] = m
+
 
 		old_markets = self._markets["Binance"]
+		self._markets["Binance"] = new_markets
 
-		for i, old_market in enumerate(old_markets):
+		self._significant_markets.clear()
+		for k,new_market in new_markets.items():
 
-			new_market = new_markets[i]
+			market_symbol = new_market["symbol"]
 
-			symb1 = old_market["symbol"]
-			symb2 = new_market["symbol"]
+			if market_symbol in old_markets:
+				old_market = old_markets[market_symbol]
 
-			if symb1 == symb2:
 				try:
 					old_price = float(old_market["price"])
 					new_price = float(new_market["price"])
@@ -365,7 +439,7 @@ class Bot:
 
 				info = {
 					"exchange": "Binance",
-					"market_name": symb1,
+					"market_name": market_symbol,
 					"old_price": old_price,
 					"new_price": new_price,
 				}
@@ -373,131 +447,38 @@ class Bot:
 				out = await self._process_market(session, info)
 				if out:
 					outputs.extend(out)
-					change = self._percent_change(new_price, old_price)
-					if change >= self._mooning or change <= self._free_fall:
-						price_updates[i] = new_price
 
-		return (outputs, price_updates)
-
-
-	async def _check_bittrex_markets(self, session: aiohttp.ClientSession) -> tuple:
-		"""
-		Checks bittrex markets for significant price/rsi updates.
-
-		Args:
-			session: The aiohttp ClientSession to be used to GET data from bittrex
-		
-		Returns:
-			tuple of outputs & price updates
-		
-		"""
-		self._logger.debug("Checking bittrex markets")
-
-		outputs = []
-		price_updates = {}
-
-		new_markets = await self._get_bittrex_markets(session)
-
-		old_markets = self._markets["Bittrex"]
-
-		# get percent change through all the marketspyt
-		for i, old_market in enumerate(old_markets["result"]):
-			try:
-				new_market = new_markets["result"][i]
-
-				old_market_name = old_market["MarketName"]
-				new_market_name = new_market["MarketName"]
-			except IndexError: #idk
-				continue 
-
-			if old_market_name == new_market_name:
-				try: 
-					old_price = float(old_market["Last"])
-					new_price = float(new_market["Last"])
-				except:
-					continue
-
+			else:
+				new_price = float(new_market["price"])
 				info = {
-					"exchange": "Bittrex",
-					"market_name": old_market_name,
-					"old_price": old_price,
+					"exchange": "Binance",
+					"market_name": market_symbol,
+					"old_price": new_price,
 					"new_price": new_price,
-					"1h": None,
-					"24h": None,
 				}
-
 				out = await self._process_market(session, info)
 				if out:
 					outputs.extend(out)
-					change = self._percent_change(new_price, old_price)
-					if change >= self._mooning or change <= self._free_fall:
-						price_updates[i] = new_price
 
 
 		return (outputs, price_updates)
-
-
-	def _update_prices(self, price_updates: dict) -> None:
-		"""
-		Updates prices in market dictionary. This is used to prevent
-		price update spam. Only updates price if it was significant.
-
-		Args:
-			price_updates: Prices and their exchange to update,
-				follows format. {
-					"Bittrex": {
-						0: price,
-						1: price,
-						etc, etc !
-					}
-					"Binance": {
-						Same thing!
-					}
-				}
-		
-		Returns:
-			None
-
-		"""
-
-		self._logger.debug("Updating prices: {0}".format(price_updates))
-		
-		# update bittrex markets
-		bittrex_markets = self._markets["Bittrex"]["result"]
-		for i, price in price_updates["Bittrex"].items():
-
-			self._logger.debug("Market: {0} Last: {1} New: {2}".format(
-				bittrex_markets[i]["MarketName"], bittrex_markets[i]["Last"], price)
-			)
-
-			bittrex_markets[i]["Last"] = price
-
-		# Update binance markets
-		binance_markets = self._markets["Binance"]
-		for i, price in price_updates["Binance"].items():
-
-			self._logger.debug("Market: {0} Last: {1} New: {2}".format(
-				binance_markets[i]["symbol"], binance_markets[i]["price"], price)
-			)
-
-			binance_markets[i]["price"] = price
 
 
 	async def check_markets(self) -> None:
 		"""
-		Processes bittrex and binance markets for signifcant price/rsi updates 
+		Processes Binance markets for signifcant price/rsi updates
 		and sends outputs to discord.
-		
-		Does while self._updating is true every interval minutes. 
+
+		Does while self._updating is true every interval minutes.
 
 		Args:
 			None
 
 		Returns:
 			None
-		
+
 		"""
-		async with aiohttp.ClientSession() as session:
+		async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(verify_ssl=False)) as session:
 
 			# load markets
 			await self._load_markets(session)
@@ -508,28 +489,22 @@ class Bot:
 
 				self._logger.info("Checking markets")
 
-				outputs, price_updates["Bittrex"] = await self._check_bittrex_markets(
+				outputs, price_updates["Binance"] = await self._check_binance_markets(
 					session
 					)
 
-				outputs2, price_updates["Binance"] = await self._check_binance_markets(
-					session
-					)
-
-				outputs.extend(outputs2)
 				self._logger.debug("Outputs: {0}".format(outputs))
-
-				self._update_prices(price_updates)
 
 				for out in outputs:
 					self._logger.info("Out: {0}".format(out))
 					await self._client.send_message(
-						discord.Object(id=self._update_channel), 
+						discord.Object(id=self._update_channel),
 						out
 						)
 
 				self._logger.debug("Async sleeping {0}".format(str(self._interval * 60)))
 				await asyncio.sleep ( int ( self._interval * 60 ) )
+				print("------new iteration------")
 
 
 	async def start_checking_markets(self, message: discord.Message) -> None:
@@ -617,7 +592,7 @@ def setup_logging(config: dict) -> None:
 		logging.config.dictConfig(log_config)
 
 		level = logging.INFO if config["debug"] == 0 else logging.DEBUG
-		
+
 		console_logger = logging.getLogger("main")
 		console_logger.setLevel(level)
 
@@ -654,12 +629,12 @@ if __name__ == '__main__':
 
 		elif content.startswith("$help"):
 			await client.send_message(
-				message.channel, "```Starts checking bittrex and binance markets and\
+				message.channel, "```Starts checking Binance markets and\
 				 prints the significant changes.\n" +
-					"Args\n" + 
-					"-h\tPrints this\n" + 
-					"-i\tPeriod of time spent inbetween checking the markets\n" + 
-					"-h\tHigh point to print notification\n" + 
+					"Args\n" +
+					"-h\tPrints this\n" +
+					"-i\tPeriod of time spent inbetween checking the markets\n" +
+					"-h\tHigh point to print notification\n" +
 					"-l\tLow point to print notification"
 					)
 

@@ -1,12 +1,13 @@
 {
 	"token": "your token",
-	"update_channel": "your channel id", 
+	"update_channel": "your channel id",
 	"free_fall": -4,
 	"mooning": 4,
 	"rsi_tick_interval": "thirtyMin",
-	"rsi_time_frame": 14, 
+	"rsi_time_frame": 14,
 	"over_bought": 75,
 	"over_sold": 25,
 	"update_interval": 1,
+	"vol_threshold": 1000,
 	"debug": 0
 }
