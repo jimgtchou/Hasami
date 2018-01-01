@@ -1,6 +1,6 @@
 # Hasami-BinanceWatch
 
-Credit to: [@Lokraan|https://github.com/Lokraan]
+Credit to: [@Lokraan](https://github.com/Lokraan)
 
 Hasami is a discord bot that monitors 'Binance' exchanges for significant changes in price / significant RSI values and prints it out in a specified channel.
 
